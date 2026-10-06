@@ -38,6 +38,13 @@ foreach ($cand in $possibleLocalPaths) {
     }
 }
 
+# Stop any running SpotGlow instance so files can be updated cleanly
+Stop-Process -Name "spotglow" -Force -ErrorAction SilentlyContinue
+Start-Sleep -Milliseconds 300
+
+# Remove any old temp installer file
+Remove-Item $tempInstaller -Force -ErrorAction SilentlyContinue
+
 # 2. Locate or Download Installer
 if ($localInstaller) {
     Write-Host "  [+] Found local installer: $localInstaller" -ForegroundColor Green
