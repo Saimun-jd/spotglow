@@ -1,6 +1,6 @@
 # SpotGlow One-Command Installer for Windows 10/11
 # Usage:
-#   irm https://raw.githubusercontent.com/<user>/spotglow/main/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/Saimun-jd/spotglow/main/install.ps1 | iex
 
 $ErrorActionPreference = "Stop"
 
@@ -25,7 +25,7 @@ if ($PSScriptRoot -and (Test-Path $localInstaller)) {
 } else {
     Write-Host "  [+] Fetching latest SpotGlow release..." -ForegroundColor Yellow
     # Replace with your published release URL or GitHub repo tag
-    $downloadUrl = "https://github.com/spotglow/spotglow/releases/latest/download/SpotGlow_x64-setup.exe"
+    $downloadUrl = "https://github.com/Saimun-jd/spotglow/releases/latest/download/SpotGlow_x64-setup.exe"
     
     try {
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
