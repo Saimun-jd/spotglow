@@ -307,31 +307,195 @@ body {
   gap: 22px;
 }
 
-/* Album Cover Card */
-.cover-card-container {
-  position: relative;
-  margin-bottom: 6px;
-}
+/* ───────────────────────── Album Cover Card & Pulsing Glow ───────────────────────── */
 
-.cover-card {
+.cover-card-container {
   position: relative;
   width: min(290px, 33vh);
   height: min(290px, 33vh);
-  border-radius: 18px;
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 1. Outward Pulsing Radar / Soundwave Rings */
+.cover-pulse-wave {
+  position: absolute;
+  inset: -2px;
+  border-radius: 24px;
+  border: 2px solid rgba(var(--primary-rgb), 0.85);
+  box-shadow:
+    0 0 24px rgba(var(--primary-rgb), 0.65),
+    inset 0 0 14px rgba(var(--accent-rgb), 0.35);
+  pointer-events: none;
+  z-index: 1;
+  opacity: 0;
+}
+
+.cover-pulse-wave.wave-1 {
+  animation: coverPulseWaveOut 3.2s cubic-bezier(0.16, 0.8, 0.4, 1) infinite;
+}
+
+.cover-pulse-wave.wave-2 {
+  animation: coverPulseWaveOut 3.2s cubic-bezier(0.16, 0.8, 0.4, 1) infinite 1.6s;
+}
+
+@keyframes coverPulseWaveOut {
+  0% {
+    transform: scale(0.97);
+    opacity: 0.90;
+    border-color: rgba(var(--primary-rgb), 0.90);
+  }
+  50% {
+    border-color: rgba(var(--secondary-rgb), 0.65);
+  }
+  100% {
+    transform: scale(1.32);
+    opacity: 0;
+    border-color: rgba(var(--accent-rgb), 0);
+  }
+}
+
+/* 2. Volumetric Deep Ambient Bloom Aura */
+.cover-pulse-bloom {
+  position: absolute;
+  inset: -36px;
+  border-radius: 54px;
+  background: radial-gradient(
+    circle,
+    rgba(var(--primary-rgb), 0.88) 0%,
+    rgba(var(--secondary-rgb), 0.60) 48%,
+    rgba(var(--accent-rgb), 0.25) 75%,
+    transparent 100%
+  );
+  filter: blur(44px);
+  pointer-events: none;
+  z-index: 2;
+  animation: coverPulseBloom 3.8s ease-in-out infinite alternate;
+  transition: background 1s ease;
+}
+
+@keyframes coverPulseBloom {
+  0% {
+    transform: scale(0.92);
+    opacity: 0.65;
+  }
+  100% {
+    transform: scale(1.18);
+    opacity: 0.98;
+  }
+}
+
+/* 3. Vivid Concentric Breathing Halo */
+.cover-pulse-halo {
+  position: absolute;
+  inset: -14px;
+  border-radius: 34px;
+  background: radial-gradient(
+    circle,
+    rgba(var(--primary-rgb), 0.95) 0%,
+    rgba(var(--secondary-rgb), 0.72) 52%,
+    rgba(var(--accent-rgb), 0.40) 80%,
+    transparent 100%
+  );
+  filter: blur(18px);
+  pointer-events: none;
+  z-index: 3;
+  animation: coverPulseHalo 2.6s ease-in-out infinite alternate;
+  transition: background 0.8s ease;
+}
+
+@keyframes coverPulseHalo {
+  0% {
+    transform: scale(0.98);
+    opacity: 0.75;
+    filter: blur(15px);
+  }
+  100% {
+    transform: scale(1.09);
+    opacity: 1;
+    filter: blur(24px);
+  }
+}
+
+/* 4. Immediate Contour Rim Glow */
+.cover-pulse-rim {
+  position: absolute;
+  inset: -3px;
+  border-radius: 23px;
+  background: linear-gradient(
+    135deg,
+    rgba(var(--primary-rgb), 0.92) 0%,
+    rgba(var(--accent-rgb), 0.85) 50%,
+    rgba(var(--secondary-rgb), 0.92) 100%
+  );
+  filter: blur(5px);
+  pointer-events: none;
+  z-index: 4;
+  opacity: 0.90;
+  animation: coverPulseRim 2.2s ease-in-out infinite alternate;
+}
+
+@keyframes coverPulseRim {
+  0% {
+    opacity: 0.75;
+    filter: blur(4px);
+  }
+  100% {
+    opacity: 1;
+    filter: blur(7px);
+  }
+}
+
+/* 5. The Album Artwork Card */
+.cover-card {
+  position: relative;
+  z-index: 5;
+  width: 100%;
+  height: 100%;
+  border-radius: 20px;
   overflow: hidden;
   background: #181920;
-  border: 1px solid rgba(255, 255, 255, 0.22);
+  border: 1.5px solid rgba(255, 255, 255, 0.28);
   box-shadow:
-    0 30px 75px -15px rgba(var(--primary-rgb), 0.75),
-    0 15px 35px rgba(0, 0, 0, 0.75);
-  transition: box-shadow 0.8s ease, transform 0.4s ease;
+    0 0 0 1px rgba(var(--primary-rgb), 0.50),
+    0 15px 40px rgba(0, 0, 0, 0.80),
+    0 30px 75px -12px rgba(var(--primary-rgb), 0.75),
+    0 0 50px rgba(var(--accent-rgb), 0.35);
+  transition: box-shadow 0.6s ease, transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.6s ease;
 }
 
 .cover-card:hover {
-  transform: translateY(-3px) scale(1.02);
+  transform: translateY(-4px) scale(1.025);
   box-shadow:
-    0 35px 90px -15px rgba(var(--primary-rgb), 0.90),
-    0 20px 45px rgba(0, 0, 0, 0.80);
+    0 0 0 2px rgba(var(--primary-rgb), 0.85),
+    0 22px 50px rgba(0, 0, 0, 0.85),
+    0 38px 90px -12px rgba(var(--primary-rgb), 0.92),
+    0 0 70px rgba(var(--accent-rgb), 0.55);
+}
+
+/* Paused State */
+.cover-card-container.is-paused .cover-pulse-wave {
+  opacity: 0 !important;
+  animation-play-state: paused;
+}
+
+.cover-card-container.is-paused .cover-pulse-halo {
+  animation-duration: 4.8s;
+  opacity: 0.50;
+  transform: scale(1);
+}
+
+.cover-card-container.is-paused .cover-pulse-bloom {
+  animation-duration: 5.2s;
+  opacity: 0.45;
+  transform: scale(0.95);
+}
+
+.cover-card-container.is-paused .cover-pulse-rim {
+  opacity: 0.55;
+  filter: blur(4px);
 }
 
 .cover-img {

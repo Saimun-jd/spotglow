@@ -27,6 +27,8 @@ dist-ssr
 target/
 src-tauri/target/
 src-tauri/target_diag/
+src-tauri/manifests/
+manifests/
 *.exe
 
 # Scratch & temporary test scripts

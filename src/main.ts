@@ -85,6 +85,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   // Cover Art Focus UI Elements
   const shroud = document.getElementById("cover-shroud") as HTMLElement | null;
+  const coverCardContainer = document.getElementById("cover-card-container") as HTMLElement | null;
   const coverImg = document.getElementById("cover-img") as HTMLImageElement | null;
   const coverPlaceholder = document.getElementById("cover-placeholder") as HTMLElement | null;
   const trackTitle = document.getElementById("track-title") as HTMLElement | null;
@@ -263,6 +264,16 @@ window.addEventListener("DOMContentLoaded", async () => {
         badgeEq.classList.add("playing");
       } else {
         badgeEq.classList.remove("playing");
+      }
+    }
+
+    if (coverCardContainer) {
+      if (isPlaying) {
+        coverCardContainer.classList.add("is-playing");
+        coverCardContainer.classList.remove("is-paused");
+      } else {
+        coverCardContainer.classList.remove("is-playing");
+        coverCardContainer.classList.add("is-paused");
       }
     }
 
