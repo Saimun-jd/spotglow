@@ -5,8 +5,8 @@
 $ErrorActionPreference = "Stop"
 
 Write-Host ""
-Write-Host "  ✨ SpotGlow — Ambient Spotify Window Border Glow ✨" -ForegroundColor Cyan
-Write-Host "  -------------------------------------------------" -ForegroundColor DarkGray
+Write-Host "  === SpotGlow - Ambient Spotify Window Border Glow ===" -ForegroundColor Cyan
+Write-Host "  -----------------------------------------------------" -ForegroundColor DarkGray
 
 # 1. Architecture Check
 if ([IntPtr]::Size -ne 8) {
@@ -14,25 +14,66 @@ if ([IntPtr]::Size -ne 8) {
     exit 1
 }
 
-$repo = "SpotGlow"
-$localInstaller = Join-Path $PSScriptRoot "src-tauri\target\release\bundle\nsis\SpotGlow_0.1.0_x64-setup.exe"
+$repo = "Saimun-jd/spotglow"
 $tempInstaller = Join-Path $env:TEMP "SpotGlow_Setup.exe"
 
+# Check for local build installer first (works if cloned or running in repo directory)
+$localInstaller = $null
+$possibleLocalPaths = @()
+
+if ($PSScriptRoot) {
+    $possibleLocalPaths += (Join-Path $PSScriptRoot "src-tauri\target\release\bundle\nsis\SpotGlow_0.1.0_x64-setup.exe")
+}
+
+$currentDir = (Get-Location).Path
+if ($currentDir) {
+    $possibleLocalPaths += (Join-Path $currentDir "src-tauri\target\release\bundle\nsis\SpotGlow_0.1.0_x64-setup.exe")
+    $possibleLocalPaths += (Join-Path $currentDir "spotglow\src-tauri\target\release\bundle\nsis\SpotGlow_0.1.0_x64-setup.exe")
+}
+
+foreach ($cand in $possibleLocalPaths) {
+    if (Test-Path $cand) {
+        $localInstaller = $cand
+        break
+    }
+}
+
 # 2. Locate or Download Installer
-if ($PSScriptRoot -and (Test-Path $localInstaller)) {
-    Write-Host "  [+] Using local build installer..." -ForegroundColor Green
+if ($localInstaller) {
+    Write-Host "  [+] Found local installer: $localInstaller" -ForegroundColor Green
     Copy-Item $localInstaller $tempInstaller -Force
 } else {
-    Write-Host "  [+] Fetching latest SpotGlow release..." -ForegroundColor Yellow
-    # Replace with your published release URL or GitHub repo tag
-    $downloadUrl = "https://github.com/Saimun-jd/spotglow/releases/latest/download/SpotGlow_x64-setup.exe"
-    
+    Write-Host "  [+] Fetching latest SpotGlow release from GitHub..." -ForegroundColor Yellow
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+    $downloadUrl = $null
     try {
-        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        $apiUrl = "https://api.github.com/repos/$repo/releases/latest"
+        $release = Invoke-RestMethod -Uri $apiUrl -UseBasicParsing -ErrorAction Stop
+        $exeAsset = $release.assets | Where-Object { $_.name -like "*setup*.exe" -or $_.name -like "*.exe" } | Select-Object -First 1
+        if ($exeAsset) {
+            $downloadUrl = $exeAsset.browser_download_url
+        }
+    } catch {
+        # API might return 404 if no releases have been published yet
+    }
+
+    if (-not $downloadUrl) {
+        $downloadUrl = "https://github.com/$repo/releases/latest/download/SpotGlow_0.1.0_x64-setup.exe"
+    }
+
+    try {
         Invoke-WebRequest -Uri $downloadUrl -OutFile $tempInstaller -UseBasicParsing
     } catch {
-        Write-Warning "Could not download from remote repository: $_"
-        Write-Host "To install locally, run 'npm run tauri build' and execute the installer in src-tauri\target\release\bundle\nsis\" -ForegroundColor Yellow
+        Write-Warning "Could not find a published release installer on GitHub."
+        Write-Host ""
+        Write-Host "  To install locally from source:" -ForegroundColor Yellow
+        Write-Host "    1. Build the installer: npm run tauri build" -ForegroundColor Gray
+        Write-Host "    2. Run installer script: .\install.ps1" -ForegroundColor Gray
+        Write-Host ""
+        Write-Host "  To distribute via the web:" -ForegroundColor Yellow
+        Write-Host "    Create a release at https://github.com/$repo/releases and upload SpotGlow_0.1.0_x64-setup.exe" -ForegroundColor Gray
+        Write-Host ""
         exit 1
     }
 }
@@ -42,7 +83,7 @@ Write-Host "  [+] Installing SpotGlow silently..." -ForegroundColor Green
 $process = Start-Process -FilePath $tempInstaller -ArgumentList "/S" -Wait -PassThru
 
 if ($process.ExitCode -eq 0) {
-    Write-Host "  [✓] SpotGlow installed successfully!" -ForegroundColor Green
+    Write-Host "  [OK] SpotGlow installed successfully!" -ForegroundColor Green
 } else {
     Write-Warning "Installation finished with exit code $($process.ExitCode)."
 }
@@ -51,16 +92,20 @@ if ($process.ExitCode -eq 0) {
 Remove-Item $tempInstaller -Force -ErrorAction SilentlyContinue
 
 # 5. Launch SpotGlow
-$installedExe = Join-Path $env:LOCALAPPDATA "Programs\SpotGlow\SpotGlow.exe"
-if (Test-Path $installedExe) {
-    Write-Host "  [🚀] Launching SpotGlow..." -ForegroundColor Cyan
+$candidates = @(
+    (Join-Path $env:LOCALAPPDATA "SpotGlow\spotglow.exe"),
+    (Join-Path $env:LOCALAPPDATA "SpotGlow\SpotGlow.exe"),
+    (Join-Path $env:LOCALAPPDATA "Programs\SpotGlow\spotglow.exe"),
+    (Join-Path $env:LOCALAPPDATA "Programs\SpotGlow\SpotGlow.exe"),
+    "C:\Program Files\SpotGlow\spotglow.exe",
+    "C:\Program Files\SpotGlow\SpotGlow.exe"
+)
+
+$installedExe = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+if ($installedExe) {
+    Write-Host "  [>] Launching SpotGlow ($installedExe)..." -ForegroundColor Cyan
     Start-Process $installedExe
-} else {
-    # Check alternate install locations
-    $altExe = "C:\Program Files\SpotGlow\SpotGlow.exe"
-    if (Test-Path $altExe) {
-        Start-Process $altExe
-    }
 }
 
 Write-Host "  Enjoy the glow! Control via System Tray, F8 (styles), or F9 (cover mode)." -ForegroundColor Magenta
