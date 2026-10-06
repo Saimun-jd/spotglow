@@ -1,17 +1,46 @@
-use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU8, Ordering};
 use std::sync::Arc;
 use tracing::{info, warn};
 
 use windows::Win32::Foundation::HWND;
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetClassNameW, GetWindow, GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, ShowWindow,
-    GWL_EXSTYLE, GW_HWNDPREV, HWND_TOP, IsWindowVisible, SET_WINDOW_POS_FLAGS,
-    SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW,
-    SW_HIDE, SW_SHOWNOACTIVATE,
-    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+    GetClassNameW, GetWindow, GetWindowLongPtrW, SetLayeredWindowAttributes, SetWindowLongPtrW,
+    SetWindowPos, ShowWindow, GWL_EXSTYLE, GW_HWNDPREV, HWND_TOP, IsWindowVisible,
+    SET_WINDOW_POS_FLAGS, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
+    SWP_SHOWWINDOW, SW_HIDE, SW_SHOWNOACTIVATE, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+    LWA_ALPHA,
 };
 
+use crate::state::DisplayMode;
 use crate::window_tracker::SpotifyWindowState;
+
+pub const MODE_BORDER_GLOW: u8 = 0;
+pub const MODE_COVER_ART: u8 = 1;
+
+/// Completely hides the Spotify window (both SW_HIDE and alpha = 0 layered attribute)
+pub unsafe fn hide_spotify_window(spotify_hwnd: HWND) {
+    if spotify_hwnd.0.is_null() {
+        return;
+    }
+    let cur_ex = GetWindowLongPtrW(spotify_hwnd, GWL_EXSTYLE) as u32;
+    let _ = SetWindowLongPtrW(spotify_hwnd, GWL_EXSTYLE, (cur_ex | WS_EX_LAYERED.0) as isize);
+    let _ = SetLayeredWindowAttributes(spotify_hwnd, windows::Win32::Foundation::COLORREF(0), 0, LWA_ALPHA);
+    let _ = ShowWindow(spotify_hwnd, SW_HIDE);
+    info!("[OverlayController] Spotify HWND 0x{:x} made invisible (SW_HIDE + alpha 0)", spotify_hwnd.0 as isize);
+}
+
+/// Restores the Spotify window to visible and opaque
+pub unsafe fn restore_spotify_window(spotify_hwnd: HWND) {
+    if spotify_hwnd.0.is_null() {
+        return;
+    }
+    let _ = ShowWindow(spotify_hwnd, SW_SHOWNOACTIVATE);
+    let _ = SetLayeredWindowAttributes(spotify_hwnd, windows::Win32::Foundation::COLORREF(0), 255, LWA_ALPHA);
+    let cur_ex = GetWindowLongPtrW(spotify_hwnd, GWL_EXSTYLE) as u32;
+    let _ = SetWindowLongPtrW(spotify_hwnd, GWL_EXSTYLE, (cur_ex & !WS_EX_LAYERED.0) as isize);
+    let _ = SetWindowPos(spotify_hwnd, None, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+    info!("[OverlayController] Spotify HWND 0x{:x} restored to visible", spotify_hwnd.0 as isize);
+}
 
 /// Overlay margin in LOGICAL pixels. Must equal the margin passed to `GlowRenderer`
 /// in glow.ts (`getRecommendedMargin()` returns 18 at thickness 1.0).
@@ -53,6 +82,7 @@ pub struct OverlayController {
     window: Option<tauri::WebviewWindow>,
     margin: Arc<AtomicI32>, // logical px
     is_visible: Arc<AtomicBool>,
+    display_mode: Arc<AtomicU8>,
     last_x: Arc<AtomicI32>,
     last_y: Arc<AtomicI32>,
     last_w: Arc<AtomicI32>,
@@ -69,6 +99,7 @@ impl OverlayController {
             window,
             margin: Arc::new(AtomicI32::new(DEFAULT_MARGIN)),
             is_visible: Arc::new(AtomicBool::new(false)),
+            display_mode: Arc::new(AtomicU8::new(MODE_BORDER_GLOW)),
             last_x: Arc::new(AtomicI32::new(i32::MIN)),
             last_y: Arc::new(AtomicI32::new(i32::MIN)),
             last_w: Arc::new(AtomicI32::new(0)),
@@ -88,6 +119,34 @@ impl OverlayController {
     /// Sets the margin in logical pixels (call with `renderer.getRecommendedMargin()` from the frontend).
     pub fn set_margin(&self, margin: i32) {
         self.margin.store(margin, Ordering::Relaxed);
+    }
+
+    pub fn display_mode(&self) -> DisplayMode {
+        if self.display_mode.load(Ordering::Relaxed) == MODE_COVER_ART {
+            DisplayMode::CoverArt
+        } else {
+            DisplayMode::BorderGlow
+        }
+    }
+
+    pub fn set_display_mode(&self, mode: DisplayMode) {
+        let val = match mode {
+            DisplayMode::BorderGlow => MODE_BORDER_GLOW,
+            DisplayMode::CoverArt => MODE_COVER_ART,
+        };
+        self.display_mode.store(val, Ordering::SeqCst);
+        if let Some(win) = &self.window {
+            match mode {
+                DisplayMode::CoverArt => {
+                    let _ = win.set_ignore_cursor_events(false);
+                    info!("[OverlayController] Switched to CoverArt mode: cursor events ENABLED");
+                }
+                DisplayMode::BorderGlow => {
+                    let _ = win.set_ignore_cursor_events(true);
+                    info!("[OverlayController] Switched to BorderGlow mode: cursor events DISABLED (click-through)");
+                }
+            }
+        }
     }
 
     /// Applies non-activating and tool-window ex-styles, and makes the overlay click-through.
@@ -139,36 +198,31 @@ impl OverlayController {
             }
 
             // Case 2: Spotify is active and visible
-            let (target_x, target_y, target_width, target_height, insert_after) = if state.maximized {
-                // When Spotify is maximized, it fills the monitor display.
-                // Placing the overlay behind Spotify with +margin is off-screen and occluded.
-                // Instead, the overlay matches Spotify's exact screen bounds, sits directly
-                // in front of Spotify in Z-order, and renders an inner edge-glow border.
+            let is_cover_art = self.display_mode.load(Ordering::Relaxed) == MODE_COVER_ART;
+
+            let margin = if state.maximized {
+                0
+            } else {
+                scaled_margin(self.margin.load(Ordering::Relaxed), state.dpi as f32)
+            };
+
+            let (target_x, target_y, target_width, target_height) = (
+                state.rect.left - margin,
+                state.rect.top - margin,
+                state.rect.width + margin * 2,
+                state.rect.height + margin * 2,
+            );
+
+            let insert_after = if is_cover_art || state.maximized {
                 let spotify_hwnd = HWND(state.hwnd as *mut _);
                 let above = find_window_above(spotify_hwnd, hwnd);
-                let insert = match above {
+                match above {
                     Some(w) => Some(w),
                     None => Some(HWND_TOP),
-                };
-                (
-                    state.rect.left,
-                    state.rect.top,
-                    state.rect.width,
-                    state.rect.height,
-                    insert,
-                )
+                }
             } else {
-                // When restored (floating), canonical Behind Mode:
-                // directly behind Spotify, padded by the DPI-scaled margin on all sides.
-                let margin = scaled_margin(self.margin.load(Ordering::Relaxed), state.dpi as f32);
                 let spotify_hwnd = HWND(state.hwnd as *mut _);
-                (
-                    state.rect.left - margin,
-                    state.rect.top - margin,
-                    state.rect.width + margin * 2,
-                    state.rect.height + margin * 2,
-                    Some(spotify_hwnd),
-                )
+                Some(spotify_hwnd)
             };
 
             self.last_x.swap(target_x, Ordering::SeqCst);

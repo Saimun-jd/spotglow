@@ -26,6 +26,61 @@ async fn get_current_track(state: tauri::State<'_, AppState>) -> Result<Option<T
 }
 
 #[tauri::command]
+async fn get_display_mode(state: tauri::State<'_, AppState>) -> Result<state::DisplayMode, String> {
+    let guard = state.display_mode.read().await;
+    Ok(*guard)
+}
+
+#[tauri::command]
+async fn set_display_mode(
+    mode: state::DisplayMode,
+    state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<(), String> {
+    tray::set_mode_explicit(&state, &app_handle, mode).await;
+    Ok(())
+}
+
+#[tauri::command]
+async fn get_glow_style(state: tauri::State<'_, AppState>) -> Result<state::GlowStyle, String> {
+    let guard = state.glow_style.read().await;
+    Ok(*guard)
+}
+
+#[tauri::command]
+async fn set_glow_style(
+    style: state::GlowStyle,
+    state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<(), String> {
+    tray::set_glow_style_explicit(&state, &app_handle, style).await;
+    Ok(())
+}
+
+#[tauri::command]
+async fn cycle_glow_style(
+    state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<state::GlowStyle, String> {
+    Ok(tray::cycle_glow_style(&state, &app_handle).await)
+}
+
+#[tauri::command]
+async fn media_play_pause() -> Result<bool, String> {
+    smtc::send_media_command("toggle").await
+}
+
+#[tauri::command]
+async fn media_next() -> Result<bool, String> {
+    smtc::send_media_command("next").await
+}
+
+#[tauri::command]
+async fn media_previous() -> Result<bool, String> {
+    smtc::send_media_command("previous").await
+}
+
+#[tauri::command]
 async fn save_canvas_snapshot(data_url: String, metrics: String) -> Result<(), String> {
     info!("[SpotGlow Frontend Metrics] {}", metrics);
     if let Some(base64_str) = data_url.strip_prefix("data:image/png;base64,") {
@@ -59,7 +114,19 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(app_state.clone())
-        .invoke_handler(tauri::generate_handler![get_spotify_window, get_current_track, save_canvas_snapshot])
+        .invoke_handler(tauri::generate_handler![
+            get_spotify_window,
+            get_current_track,
+            save_canvas_snapshot,
+            get_display_mode,
+            set_display_mode,
+            get_glow_style,
+            set_glow_style,
+            cycle_glow_style,
+            media_play_pause,
+            media_next,
+            media_previous
+        ])
         .setup({
             let app_state = app_state.clone();
             move |app| {
@@ -128,7 +195,56 @@ pub fn run() {
                     *guard = Some(tracker);
                 }
 
+                // Initialize system tray
+                if let Err(e) = tray::setup_tray(&app_handle, app_state.clone()) {
+                    warn!("[SpotGlow] Failed to setup system tray: {:?}", e);
+                }
 
+                // Global hotkey background thread:
+                // - Ctrl + Shift + G or F9: Toggle Mode (Border Glow <-> Cover Art Focus)
+                // - Ctrl + Shift + A or F8: Cycle Glow Animation Style (Aurora -> Pulse -> Comet -> EQ -> Plasma -> Zen)
+                let hotkey_state = app_state.clone();
+                let hotkey_handle = app_handle.clone();
+                std::thread::spawn(move || {
+                    use windows::Win32::UI::Input::KeyboardAndMouse::{
+                        RegisterHotKey, UnregisterHotKey, HOT_KEY_MODIFIERS, MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT,
+                    };
+                    use windows::Win32::UI::WindowsAndMessaging::{GetMessageW, MSG, WM_HOTKEY};
+
+                    unsafe {
+                        let _ = RegisterHotKey(None, 101, MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT, 0x47 /* 'G' */);
+                        let _ = RegisterHotKey(None, 102, HOT_KEY_MODIFIERS(0) | MOD_NOREPEAT, 0x78 /* VK_F9 */);
+                        let _ = RegisterHotKey(None, 103, MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT, 0x41 /* 'A' */);
+                        let _ = RegisterHotKey(None, 104, HOT_KEY_MODIFIERS(0) | MOD_NOREPEAT, 0x77 /* VK_F8 */);
+
+                        let mut msg = MSG::default();
+                        while GetMessageW(&mut msg, None, 0, 0).as_bool() {
+                            if msg.message == WM_HOTKEY {
+                                match msg.wParam.0 {
+                                    101 | 102 => {
+                                        let state = hotkey_state.clone();
+                                        let handle = hotkey_handle.clone();
+                                        tauri::async_runtime::spawn(async move {
+                                            tray::toggle_display_mode(&state, &handle).await;
+                                        });
+                                    }
+                                    103 | 104 => {
+                                        let state = hotkey_state.clone();
+                                        let handle = hotkey_handle.clone();
+                                        tauri::async_runtime::spawn(async move {
+                                            tray::cycle_glow_style(&state, &handle).await;
+                                        });
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                        let _ = UnregisterHotKey(None, 101);
+                        let _ = UnregisterHotKey(None, 102);
+                        let _ = UnregisterHotKey(None, 103);
+                        let _ = UnregisterHotKey(None, 104);
+                    }
+                });
 
                 Ok(())
             }

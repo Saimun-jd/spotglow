@@ -48,7 +48,8 @@ pub struct SpotifyWindowState {
 pub type WindowEventCallback = Arc<dyn Fn(SpotifyWindowState) + Send + Sync>;
 
 // Global state shared with the WinEvent callback
-static mut ACTIVE_SPOTIFY_HWND: isize = 0;
+pub static SPOTIFY_DELIBERATELY_HIDDEN: AtomicBool = AtomicBool::new(false);
+pub static mut ACTIVE_SPOTIFY_HWND: isize = 0;
 static mut TRACKER_THREAD_ID: u32 = 0;
 
 /// Attaches the calling thread to the interactive "Default" desktop on "WinSta0".
@@ -270,6 +271,18 @@ unsafe extern "system" fn win_event_proc(
 pub fn find_spotify_window() -> Option<HWND> {
     attach_to_default_desktop();
 
+    // If Spotify was deliberately hidden by SpotGlow, check if the known HWND is still valid
+    if SPOTIFY_DELIBERATELY_HIDDEN.load(Ordering::Relaxed) {
+        unsafe {
+            if ACTIVE_SPOTIFY_HWND != 0 {
+                let h = HWND(ACTIVE_SPOTIFY_HWND as *mut _);
+                if IsWindow(Some(h)).as_bool() {
+                    return Some(h);
+                }
+            }
+        }
+    }
+
     struct SearchContext {
         found: Option<HWND>,
     }
@@ -279,8 +292,9 @@ pub fn find_spotify_window() -> Option<HWND> {
     unsafe extern "system" fn enum_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
         let ctx = &mut *(lparam.0 as *mut SearchContext);
 
-        // 1. Must be visible or iconic (minimized)
-        if !IsWindowVisible(hwnd).as_bool() && !IsIconic(hwnd).as_bool() {
+        let is_hidden = SPOTIFY_DELIBERATELY_HIDDEN.load(Ordering::Relaxed);
+        // 1. Must be visible or iconic (minimized) or deliberately hidden
+        if !IsWindowVisible(hwnd).as_bool() && !IsIconic(hwnd).as_bool() && !is_hidden {
             return BOOL(1);
         }
 
@@ -320,8 +334,8 @@ pub fn find_spotify_window() -> Option<HWND> {
                     let title_len = GetWindowTextW(hwnd, &mut title_buf);
                     let title = String::from_utf16_lossy(&title_buf[..title_len as usize]);
 
-                    // Spotify desktop main window has a title (or when iconic)
-                    if !title.is_empty() || IsIconic(hwnd).as_bool() {
+                    // Spotify desktop main window has a title (or when iconic or deliberately hidden)
+                    if !title.is_empty() || IsIconic(hwnd).as_bool() || is_hidden {
                         let _ = CloseHandle(process);
                         ctx.found = Some(hwnd);
                         return BOOL(0); // Stop enumeration
@@ -351,7 +365,8 @@ pub fn get_window_state(hwnd: HWND) -> Option<SpotifyWindowState> {
             return None;
         }
 
-        let visible = IsWindowVisible(hwnd).as_bool();
+        let is_hidden_by_us = SPOTIFY_DELIBERATELY_HIDDEN.load(Ordering::Relaxed);
+        let visible = IsWindowVisible(hwnd).as_bool() || is_hidden_by_us;
         let minimized = IsIconic(hwnd).as_bool();
         let maximized = IsZoomed(hwnd).as_bool();
 

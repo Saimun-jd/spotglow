@@ -110,6 +110,7 @@ impl SmtcService {
                 let mut last_status = PlaybackStatus::Unknown;
                 let mut last_position_ms: u64 = 0;
                 let mut cached_thumbnail_path: Option<String> = None;
+                let mut cached_thumbnail_data_url: Option<String> = None;
                 let mut cached_palette: PaletteInfo = PaletteInfo::fallback();
 
                 // Trigger an initial check
@@ -164,9 +165,10 @@ impl SmtcService {
 
                                     if title_changed {
                                         cached_thumbnail_path = None;
+                                        cached_thumbnail_data_url = None;
                                     }
 
-                                    // If new thumbnail bytes are available, extract palette and save to disk
+                                    // If new thumbnail bytes are available, extract palette, base64 data url, and save to disk
                                     if let Some(bytes) = thumb_bytes {
                                         let palette = extract_palette(&bytes);
                                         info!(
@@ -180,16 +182,22 @@ impl SmtcService {
                                         );
                                         cached_palette = palette;
 
+                                        use base64::Engine;
+                                        let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+                                        cached_thumbnail_data_url = Some(format!("data:image/png;base64,{}", b64));
+
                                         if let Some(path) = save_thumbnail_to_disk(&bytes) {
                                             info!("[SMTC] Album art thumbnail saved to: {}", path.display());
                                             cached_thumbnail_path = Some(path.to_string_lossy().to_string());
                                         }
                                     } else if title_changed && cached_thumbnail_path.is_none() {
                                         cached_palette = PaletteInfo::fallback();
+                                        cached_thumbnail_data_url = None;
                                     }
 
                                     let mut final_metadata = metadata;
                                     final_metadata.thumbnail_path = cached_thumbnail_path.clone();
+                                    final_metadata.thumbnail_data_url = cached_thumbnail_data_url.clone();
                                     final_metadata.palette = cached_palette.clone();
                                     final_metadata.mood = cached_palette.mood;
 
@@ -222,6 +230,7 @@ impl SmtcService {
                                 Ok(Ok(None)) => {
                                     current_session_id = None;
                                     cached_thumbnail_path = None;
+                                    cached_thumbnail_data_url = None;
                                     cached_palette = PaletteInfo::fallback();
 
                                     if !last_title.is_empty() {
@@ -244,6 +253,7 @@ impl SmtcService {
                                                 palette: PaletteInfo::fallback(),
                                                 mood: crate::palette::Mood::Balanced,
                                                 thumbnail_path: None,
+                                                thumbnail_data_url: None,
                                             };
                                             cb(empty_payload);
                                         }
@@ -423,6 +433,7 @@ fn process_smtc_tick(
         status,
         timeline,
         thumbnail_path: None,
+        thumbnail_data_url: None,
         palette: PaletteInfo::fallback(),
         mood: crate::palette::Mood::Balanced,
     };
@@ -495,3 +506,45 @@ fn save_thumbnail_to_disk(bytes: &[u8]) -> Option<PathBuf> {
         }
     }
 }
+
+/// Dispatches media control commands to Spotify via Windows SMTC
+pub async fn send_media_command(command: &str) -> Result<bool, String> {
+    let cmd = command.to_string();
+    tokio::task::spawn_blocking(move || {
+        let manager = GlobalSystemMediaTransportControlsSessionManager::RequestAsync()
+            .map_err(|e| format!("Failed to request SMTC manager: {:?}", e))?
+            .join()
+            .map_err(|e| format!("Failed to join SMTC manager op: {:?}", e))?;
+
+        let sessions = manager.GetSessions().map_err(|e| format!("Failed to get sessions: {:?}", e))?;
+        for session in sessions {
+            if let Ok(app_id) = session.SourceAppUserModelId() {
+                if app_id.to_string().to_lowercase().contains("spotify") {
+                    let op_res = match cmd.as_str() {
+                        "play_pause" | "toggle" => {
+                            session.TryTogglePlayPauseAsync().and_then(|op| op.join())
+                        }
+                        "play" => {
+                            session.TryPlayAsync().and_then(|op| op.join())
+                        }
+                        "pause" => {
+                            session.TryPauseAsync().and_then(|op| op.join())
+                        }
+                        "next" => {
+                            session.TrySkipNextAsync().and_then(|op| op.join())
+                        }
+                        "previous" => {
+                            session.TrySkipPreviousAsync().and_then(|op| op.join())
+                        }
+                        _ => return Err(format!("Unknown media command: {}", cmd)),
+                    };
+                    return op_res.map_err(|e| format!("SMTC command failed: {:?}", e));
+                }
+            }
+        }
+        Err("Active Spotify SMTC session not found".to_string())
+    })
+    .await
+    .map_err(|e| format!("Task join error: {:?}", e))?
+}
+

@@ -1,18 +1,19 @@
-import { ColorRgb, Mood, PlaybackStatus, TrackUpdatePayload, WindowRect } from "./main";
+import { ColorRgb, DisplayMode, Mood, PlaybackStatus, TrackUpdatePayload, WindowRect } from "./main";
 
-export type GlowMode = "flow" | "breathe" | "progress" | "comet" | "all";
+export type GlowStyle =
+  | "aurora_flow"
+  | "cyber_pulse"
+  | "comet_orbit"
+  | "audio_eq"
+  | "plasma_storm"
+  | "zen_progress";
+
+export type GlowMode = GlowStyle | "flow" | "breathe" | "progress" | "comet" | "all";
 
 interface ColorLerp {
   r: number;
   g: number;
   b: number;
-}
-
-interface EffectSet {
-  breathe: boolean;
-  flow: boolean;
-  comet: boolean;
-  progress: boolean;
 }
 
 /** Worst-case outward reach of the glow, per 1.0 of thickness, in logical px.
@@ -41,7 +42,8 @@ export class GlowRenderer {
 
   private status: PlaybackStatus = "playing";
   private mood: Mood = "balanced";
-  private mode: GlowMode = "all";
+  private style: GlowStyle = "aurora_flow";
+  private displayMode: DisplayMode = "border_glow";
 
   // Timeline extrapolation
   private timelinePositionMs: number = 0;
@@ -52,7 +54,7 @@ export class GlowRenderer {
   private isVisible: boolean = false;
   private isMaximized: boolean = false;
   private margin: number = 18; // logical px, must match the Rust overlay margin
-  private cornerRadius: number = 8; // Windows 11 window corner radius
+  private cornerRadius: number = 12; // Windows 11 rounded corner radius (matches CSS var(--radius))
   private thickness: number = 1.0; // 0.5 (hairline) .. 2 (bold)
 
   // Intensity / paused state
@@ -105,12 +107,47 @@ export class GlowRenderer {
     return Math.ceil(REACH_PER_THICKNESS * this.thickness) + 2;
   }
 
+  public setStyle(style: GlowStyle | string) {
+    if (
+      style === "aurora_flow" ||
+      style === "cyber_pulse" ||
+      style === "comet_orbit" ||
+      style === "audio_eq" ||
+      style === "plasma_storm" ||
+      style === "zen_progress"
+    ) {
+      this.style = style;
+    } else if (style === "flow" || style === "all") {
+      this.style = "aurora_flow";
+    } else if (style === "breathe") {
+      this.style = "cyber_pulse";
+    } else if (style === "comet") {
+      this.style = "comet_orbit";
+    } else if (style === "progress") {
+      this.style = "zen_progress";
+    }
+    this.startAnimation();
+  }
+
+  public getStyle(): GlowStyle {
+    return this.style;
+  }
+
   public setMode(mode: GlowMode) {
-    this.mode = mode;
+    this.setStyle(mode);
   }
 
   public getMode(): GlowMode {
-    return this.mode;
+    return this.style;
+  }
+
+  public setDisplayMode(mode: DisplayMode) {
+    this.displayMode = mode;
+    this.startAnimation();
+  }
+
+  public getDisplayMode(): DisplayMode {
+    return this.displayMode;
   }
 
   public updateTrack(payload: TrackUpdatePayload) {
@@ -191,15 +228,29 @@ export class GlowRenderer {
 
   private ensureVibrant(c: ColorRgb): ColorLerp {
     const maxVal = Math.max(c.r, c.g, c.b);
-    if (maxVal < 140) {
-      const factor = 140 / Math.max(1, maxVal);
-      return {
-        r: Math.min(255, Math.round(c.r * factor)),
-        g: Math.min(255, Math.round(c.g * factor)),
-        b: Math.min(255, Math.round(c.b * factor)),
-      };
+    let r = c.r;
+    let g = c.g;
+    let b = c.b;
+
+    // Guarantee intense luminous peak (scaled up to at least 235 out of 255)
+    if (maxVal < 235) {
+      const factor = 235 / Math.max(1, maxVal);
+      r = Math.min(255, Math.round(r * factor));
+      g = Math.min(255, Math.round(g * factor));
+      b = Math.min(255, Math.round(b * factor));
     }
-    return { r: c.r, g: c.g, b: c.b };
+
+    // Boost saturation: widen separation between dominant and recessive channels
+    const newMax = Math.max(r, g, b);
+    const newMin = Math.min(r, g, b);
+    if (newMax - newMin < 70 && newMax > 0) {
+      const avg = (r + g + b) / 3;
+      r = Math.min(255, Math.max(0, Math.round(avg + (r - avg) * 1.45)));
+      g = Math.min(255, Math.max(0, Math.round(avg + (g - avg) * 1.45)));
+      b = Math.min(255, Math.max(0, Math.round(avg + (b - avg) * 1.45)));
+    }
+
+    return { r, g, b };
   }
 
   private lerpColor(a: ColorLerp, b: ColorLerp, t: number): ColorLerp {
@@ -341,39 +392,6 @@ export class GlowRenderer {
     return { x: x + radius - Math.cos(a) * radius, y: y + radius - Math.sin(a) * radius };
   }
 
-  // ───────────────────────── Effect presets ─────────────────────────
-
-  private activeEffects(): EffectSet {
-    switch (this.mode) {
-      case "breathe":
-        return { breathe: true, flow: false, comet: false, progress: false };
-      case "flow":
-        return { breathe: false, flow: true, comet: false, progress: false };
-      case "progress":
-        return { breathe: false, flow: false, comet: false, progress: true };
-      case "comet":
-        return { breathe: false, flow: false, comet: true, progress: false };
-      case "all":
-      default:
-        break;
-    }
-
-    // "all" → choose the effect mix from the song's mood
-    switch (this.mood) {
-      case "vivid":
-        return { breathe: true, flow: true, comet: true, progress: true };
-      case "mellow":
-        return { breathe: true, flow: false, comet: false, progress: true };
-      case "monochrome":
-        return { breathe: true, flow: false, comet: false, progress: true };
-      case "dual_tone":
-        return { breathe: true, flow: true, comet: false, progress: true };
-      case "balanced":
-      default:
-        return { breathe: true, flow: true, comet: true, progress: true };
-    }
-  }
-
   // ───────────────────────── Render ─────────────────────────
 
   private render(timestamp: number, delta: number) {
@@ -434,7 +452,7 @@ export class GlowRenderer {
     let blurMult = 1.0;
     switch (this.mood) {
       case "vivid":
-        speedMult = 1.4;
+        speedMult = 1.35;
         blurMult = 1.15;
         break;
       case "mellow":
@@ -442,8 +460,8 @@ export class GlowRenderer {
         blurMult = 0.9;
         break;
       case "monochrome":
-        speedMult = 0.5;
-        blurMult = 0.8;
+        speedMult = 0.55;
+        blurMult = 0.85;
         break;
       case "dual_tone":
         speedMult = 1.1;
@@ -454,28 +472,14 @@ export class GlowRenderer {
         break;
     }
 
-    const fx = this.activeEffects();
-
-    // 4. Breathe
-    const breatheCycle = (timestamp * 0.0018 * speedMult) % (Math.PI * 2);
-    const breatheFactor = fx.breathe ? 0.8 + 0.2 * Math.sin(breatheCycle) : 1.0;
-
-    // 5. Burst decay (track-change flare)
+    // 4. Burst decay (track-change flare)
     this.burst = Math.max(0, this.burst - delta * 0.0012);
     const burstBoost = 1 + this.burst * 0.6;
-    const activeIntensity = Math.min(1, this.currentIntensity * breatheFactor * burstBoost);
+    const activeIntensity = Math.min(1, this.currentIntensity * burstBoost);
 
-    // 6. Flow rotation
-    if (fx.flow) {
-      this.rotationAngle = (this.rotationAngle + delta * 0.0006 * speedMult) % (Math.PI * 2);
-    }
-
-    // 7. Geometry: path hugs Spotify's edge (outside), or the screen edge (inside) when maximized
+    // 5. Geometry
     const T = this.thickness * (this.isMaximized ? 1.3 : 1.0);
-    // const core = 2 * T; // crisp core line width
-    // const T = this.thickness * (this.isMaximized ? 1.0 : 1.0);
     const core = 1.2 * T;
-    // const m = this.isMaximized ? 0 : this.margin;
     let m = 0;
     if (!this.isMaximized) {
       m = this.margin;
@@ -484,12 +488,13 @@ export class GlowRenderer {
         if (derived > 0 && derived < 100) m = derived;
       }
     }
-    const off = this.isMaximized ? core / 2 : -core / 2;
+    const isCoverArt = this.displayMode === "cover_art";
+    const off = this.isMaximized ? core / 2 : (isCoverArt ? 0 : -core / 2);
     const x = m + off;
     const y = m + off;
     const w = Math.max(0, width - (m + off) * 2);
     const h = Math.max(0, height - (m + off) * 2);
-    const r = this.isMaximized ? 0 : this.cornerRadius + core / 2;
+    const r = this.isMaximized ? 0 : (isCoverArt ? this.cornerRadius : this.cornerRadius + core / 2);
     const cx = x + w / 2;
     const cy = y + h / 2;
     const perimeter = Math.max(
@@ -501,8 +506,62 @@ export class GlowRenderer {
 
     ctx.save();
     ctx.scale(dpr, dpr);
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
 
-    // Stroke gradient: true conic sweep around the border (falls back to linear)
+    // Dispatch to selected style renderer
+    switch (this.style) {
+      case "cyber_pulse":
+        this.renderCyberPulse(ctx, dpr, timestamp, delta, speedMult, blurMult, activeIntensity, T, core, x, y, w, h, r, cx, cy, perimeter, cPrimary, cSecondary, cAccent);
+        break;
+      case "comet_orbit":
+        this.renderCometOrbit(ctx, dpr, timestamp, delta, speedMult, blurMult, activeIntensity, T, core, x, y, w, h, r, cx, cy, perimeter, cPrimary, cSecondary, cAccent);
+        break;
+      case "audio_eq":
+        this.renderAudioEq(ctx, dpr, timestamp, delta, speedMult, blurMult, activeIntensity, T, core, x, y, w, h, r, cx, cy, perimeter, cPrimary, cSecondary, cAccent);
+        break;
+      case "plasma_storm":
+        this.renderPlasmaStorm(ctx, dpr, timestamp, delta, speedMult, blurMult, activeIntensity, T, core, x, y, w, h, r, cx, cy, perimeter, cPrimary, cSecondary, cAccent);
+        break;
+      case "zen_progress":
+        this.renderZenProgress(ctx, dpr, timestamp, delta, speedMult, blurMult, activeIntensity, T, core, x, y, w, h, r, cx, cy, perimeter, cPrimary, cSecondary, cAccent);
+        break;
+      case "aurora_flow":
+      default:
+        this.renderAuroraFlow(ctx, dpr, timestamp, delta, speedMult, blurMult, activeIntensity, T, core, x, y, w, h, r, cx, cy, perimeter, cPrimary, cSecondary, cAccent);
+        break;
+    }
+
+    ctx.restore();
+  }
+
+  // ───────────────────────── Style 1: Aurora Flow ─────────────────────────
+
+  private renderAuroraFlow(
+    ctx: CanvasRenderingContext2D,
+    dpr: number,
+    timestamp: number,
+    delta: number,
+    speedMult: number,
+    blurMult: number,
+    activeIntensity: number,
+    T: number,
+    core: number,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    r: number,
+    cx: number,
+    cy: number,
+    _perimeter: number,
+    cPrimary: ColorLerp,
+    cSecondary: ColorLerp,
+    cAccent: ColorLerp
+  ) {
+    this.rotationAngle = (this.rotationAngle + delta * 0.00065 * speedMult) % (Math.PI * 2);
+    const breatheFactor = 0.85 + 0.15 * Math.sin(timestamp * 0.0018 * speedMult);
+
     let grad: CanvasGradient;
     if (typeof ctx.createConicGradient === "function") {
       grad = ctx.createConicGradient(this.rotationAngle, cx, cy);
@@ -526,103 +585,551 @@ export class GlowRenderer {
     }
 
     ctx.strokeStyle = grad;
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
 
-    // 8. Glow layers (outer → inner). Widths/blur scale with thickness.
-    const widthBoost = 1 + this.burst * 0.3;
-    
-
-const layers = [
-    {
-        lw: 2.0 * T * widthBoost,
-        blur: 3.0 * T * blurMult,
-        alpha: 0.35,
-        color: cPrimary
-    },
-    {
-        lw: 1.5 * T * widthBoost,
-        blur: 2.0 * T * blurMult,
-        alpha: 0.55,
-        color: cSecondary
-    },
-    {
-        lw: core,
-        blur: 1.0 * T,
+    const layers = [
+      {
+        lw: 2.8 * T,
+        blur: 5.0 * T * blurMult * breatheFactor,
+        alpha: 0.70,
+        color: cPrimary,
+      },
+      {
+        lw: 1.8 * T,
+        blur: 2.8 * T * blurMult,
+        alpha: 0.85,
+        color: cSecondary,
+      },
+      {
+        lw: core * 1.15,
+        blur: 1.4 * T,
         alpha: 1.0,
-        color: cAccent
-    },
-];
+        color: cAccent,
+      },
+    ];
 
     for (const layer of layers) {
       ctx.save();
       ctx.globalAlpha = layer.alpha * activeIntensity;
       ctx.lineWidth = layer.lw;
-      ctx.shadowColor = this.rgbString(layer.color, 0.95);
-      ctx.shadowBlur = layer.blur * breatheFactor * dpr; // shadowBlur ignores ctx.scale
+      ctx.shadowColor = this.rgbString(layer.color, 1.0);
+      ctx.shadowBlur = layer.blur * dpr;
       this.roundedRectPath(ctx, x, y, w, h, r);
       ctx.stroke();
       ctx.restore();
     }
 
-    // 9. Comet: bright head with a fading tail orbiting the border
-    if (fx.comet) {
-      const cometLen = perimeter * 0.14;
-      const steps = 6;
-      const seg = cometLen / steps;
-      const headPos = ((timestamp * 0.00007 * speedMult) % 1) * perimeter;
+    // Incandescent hot-core laser line for high-energy brilliance
+    ctx.save();
+    ctx.globalAlpha = 0.92 * activeIntensity;
+    ctx.lineWidth = core * 0.55;
+    ctx.strokeStyle = "#ffffff";
+    ctx.shadowColor = this.rgbString(cAccent, 1.0);
+    ctx.shadowBlur = 2.5 * T * dpr;
+    this.roundedRectPath(ctx, x, y, w, h, r);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // ───────────────────────── Style 2: Cyber Pulse ─────────────────────────
+
+  private renderCyberPulse(
+    ctx: CanvasRenderingContext2D,
+    dpr: number,
+    timestamp: number,
+    _delta: number,
+    speedMult: number,
+    blurMult: number,
+    activeIntensity: number,
+    T: number,
+    core: number,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    r: number,
+    _cx: number,
+    _cy: number,
+    _perimeter: number,
+    cPrimary: ColorLerp,
+    _cSecondary: ColorLerp,
+    cAccent: ColorLerp
+  ) {
+    // Cardiac rhythmic waveform: primary thump + secondary reverberation
+    const omega = (timestamp * 0.0035 * speedMult) % (Math.PI * 2);
+    const s1 = Math.max(0, Math.sin(omega));
+    const beat1 = Math.pow(s1, 1.8);
+    const s2 = Math.max(0, Math.sin(omega * 2));
+    const beat2 = 0.32 * Math.pow(s2, 2.5);
+    const pulse = Math.min(1.0, beat1 + beat2);
+
+    const outerLw = (1.8 + 2.2 * pulse) * T;
+    const outerBlur = (3.5 + 5.5 * pulse) * T * blurMult;
+
+    // 1. Outward pulsating diffuse aura
+    ctx.save();
+    ctx.globalAlpha = (0.55 + 0.45 * pulse) * activeIntensity;
+    ctx.lineWidth = outerLw;
+    ctx.strokeStyle = this.rgbString(cPrimary);
+    ctx.shadowColor = this.rgbString(cPrimary, 1.0);
+    ctx.shadowBlur = outerBlur * dpr;
+    this.roundedRectPath(ctx, x, y, w, h, r);
+    ctx.stroke();
+    ctx.restore();
+
+    // 2. High-contrast neon laser core
+    ctx.save();
+    ctx.globalAlpha = 1.0 * activeIntensity;
+    ctx.lineWidth = core * 1.15;
+    ctx.strokeStyle = this.rgbString(pulse > 0.55 ? { r: 255, g: 255, b: 255 } : cAccent);
+    ctx.shadowColor = this.rgbString(cAccent, 1.0);
+    ctx.shadowBlur = (2.0 + 4.0 * pulse) * T * dpr;
+    this.roundedRectPath(ctx, x, y, w, h, r);
+    ctx.stroke();
+    ctx.restore();
+
+    // 3. Corner neon brackets (accentuate corners on beat pulses)
+    if (pulse > 0.25 && !this.isMaximized) {
+      const pingAlpha = Math.min(1.0, (pulse - 0.25) / 0.75 * 1.2 * activeIntensity);
+      const bracketLen = 24 * T;
+      ctx.save();
+      ctx.globalAlpha = pingAlpha;
+      ctx.lineWidth = core * 1.6;
+      ctx.strokeStyle = "#ffffff";
+      ctx.shadowColor = this.rgbString(cAccent, 1.0);
+      ctx.shadowBlur = 12 * T * dpr;
+
+      // Top-Left corner
+      ctx.beginPath();
+      ctx.moveTo(x, y + bracketLen);
+      ctx.lineTo(x, y + r);
+      ctx.arcTo(x, y, x + r, y, r);
+      ctx.lineTo(x + bracketLen, y);
+      ctx.stroke();
+
+      // Top-Right corner
+      ctx.beginPath();
+      ctx.moveTo(x + w - bracketLen, y);
+      ctx.lineTo(x + w - r, y);
+      ctx.arcTo(x + w, y, x + w, y + r, r);
+      ctx.lineTo(x + w, y + bracketLen);
+      ctx.stroke();
+
+      // Bottom-Right corner
+      ctx.beginPath();
+      ctx.moveTo(x + w, y + h - bracketLen);
+      ctx.lineTo(x + w, y + h - r);
+      ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+      ctx.lineTo(x + w - bracketLen, y + h);
+      ctx.stroke();
+
+      // Bottom-Left corner
+      ctx.beginPath();
+      ctx.moveTo(x + bracketLen, y + h);
+      ctx.lineTo(x + r, y + h);
+      ctx.arcTo(x, y + h, x, y + h - r, r);
+      ctx.lineTo(x, y + h - bracketLen);
+      ctx.stroke();
+
+      ctx.restore();
+    }
+  }
+
+  // ───────────────────────── Style 3: Comet Orbit ─────────────────────────
+
+  private renderCometOrbit(
+    ctx: CanvasRenderingContext2D,
+    dpr: number,
+    timestamp: number,
+    _delta: number,
+    speedMult: number,
+    _blurMult: number,
+    activeIntensity: number,
+    T: number,
+    core: number,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    r: number,
+    _cx: number,
+    _cy: number,
+    perimeter: number,
+    cPrimary: ColorLerp,
+    cSecondary: ColorLerp,
+    cAccent: ColorLerp
+  ) {
+    // 1. Radiant orbital base frame
+    ctx.save();
+    ctx.globalAlpha = 0.30 * activeIntensity;
+    ctx.lineWidth = core * 1.1;
+    ctx.strokeStyle = this.rgbString(cPrimary);
+    ctx.shadowColor = this.rgbString(cPrimary, 1.0);
+    ctx.shadowBlur = 3.0 * T * dpr;
+    this.roundedRectPath(ctx, x, y, w, h, r);
+    ctx.stroke();
+    ctx.restore();
+
+    // 2. Comet Alpha (Primary color with incandescent white head, sweeps clockwise)
+    const cometLen1 = perimeter * 0.28;
+    const steps1 = 9;
+    const seg1 = cometLen1 / steps1;
+    const headPos1 = ((timestamp * 0.00010 * speedMult) % 1) * perimeter;
+
+    ctx.save();
+    ctx.lineCap = "butt";
+    ctx.lineWidth = core * 1.5;
+    ctx.shadowColor = this.rgbString(cPrimary, 1.0);
+    ctx.shadowBlur = 6.0 * T * dpr;
+
+    for (let k = 0; k < steps1; k++) {
+      const segStart = headPos1 - cometLen1 + k * seg1;
+      const wrapped = ((segStart % perimeter) + perimeter) % perimeter;
+      const norm = (k + 1) / steps1;
+      const a = norm * norm;
+      ctx.globalAlpha = a * activeIntensity;
+      ctx.strokeStyle = this.rgbString(norm > 0.85 ? { r: 255, g: 255, b: 255 } : cPrimary);
+      ctx.setLineDash([seg1 + 0.5, perimeter - seg1]);
+      ctx.lineDashOffset = -wrapped;
+      this.roundedRectPath(ctx, x, y, w, h, r);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // Comet Alpha Head Particle Orb
+    const pt1 = this.pointOnPath(headPos1, x, y, w, h, r);
+    ctx.save();
+    ctx.globalAlpha = activeIntensity;
+    ctx.fillStyle = "#ffffff";
+    ctx.shadowColor = this.rgbString(cPrimary, 1.0);
+    ctx.shadowBlur = 14 * T * dpr;
+    ctx.beginPath();
+    ctx.arc(pt1.x, pt1.y, 3.4 * T, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // 3. Comet Beta (Secondary & Accent colors, sweeps counter-direction/offset)
+    const cometLen2 = perimeter * 0.20;
+    const steps2 = 7;
+    const seg2 = cometLen2 / steps2;
+    const headPos2 = ((1 - ((timestamp * 0.000085 * speedMult + 0.5) % 1)) % 1) * perimeter;
+
+    ctx.save();
+    ctx.lineCap = "butt";
+    ctx.lineWidth = core * 1.3;
+    ctx.shadowColor = this.rgbString(cSecondary, 1.0);
+    ctx.shadowBlur = 5.0 * T * dpr;
+
+    for (let k = 0; k < steps2; k++) {
+      const segStart = headPos2 - cometLen2 + k * seg2;
+      const wrapped = ((segStart % perimeter) + perimeter) % perimeter;
+      const norm = (k + 1) / steps2;
+      const a = norm * norm;
+      ctx.globalAlpha = a * 0.95 * activeIntensity;
+      ctx.strokeStyle = this.rgbString(norm > 0.8 ? cAccent : cSecondary);
+      ctx.setLineDash([seg2 + 0.5, perimeter - seg2]);
+      ctx.lineDashOffset = -wrapped;
+      this.roundedRectPath(ctx, x, y, w, h, r);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // Comet Beta Head Particle Orb
+    const pt2 = this.pointOnPath(headPos2, x, y, w, h, r);
+    ctx.save();
+    ctx.globalAlpha = activeIntensity;
+    ctx.fillStyle = "#ffffff";
+    ctx.shadowColor = this.rgbString(cAccent, 1.0);
+    ctx.shadowBlur = 12 * T * dpr;
+    ctx.beginPath();
+    ctx.arc(pt2.x, pt2.y, 2.8 * T, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // 4. Crossing flash flare (when two comets cross nearby)
+    const distSq = (pt1.x - pt2.x) * (pt1.x - pt2.x) + (pt1.y - pt2.y) * (pt1.y - pt2.y);
+    if (distSq < 1600) {
+      const prox = 1 - Math.sqrt(distSq) / 40;
+      ctx.save();
+      ctx.globalAlpha = prox * activeIntensity;
+      ctx.fillStyle = "#ffffff";
+      ctx.shadowColor = "#ffffff";
+      ctx.shadowBlur = 18 * T * dpr;
+      const mx = (pt1.x + pt2.x) / 2;
+      const my = (pt1.y + pt2.y) / 2;
+      ctx.beginPath();
+      ctx.arc(mx, my, 4.0 * T * prox, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  // ───────────────────────── Style 4: Audio EQ Bars ─────────────────────────
+
+  private renderAudioEq(
+    ctx: CanvasRenderingContext2D,
+    dpr: number,
+    timestamp: number,
+    _delta: number,
+    speedMult: number,
+    _blurMult: number,
+    activeIntensity: number,
+    T: number,
+    _core: number,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    r: number,
+    _cx: number,
+    _cy: number,
+    perimeter: number,
+    cPrimary: ColorLerp,
+    cSecondary: ColorLerp,
+    cAccent: ColorLerp
+  ) {
+    const N = 56;
+    const step = perimeter / N;
+    const dashLen = step * 0.68;
+
+    ctx.save();
+    ctx.lineCap = "round";
+
+    for (let i = 0; i < N; i++) {
+      const pos = i * step;
+      const normPos = pos / perimeter;
+
+      // Simulated multi-band frequency response:
+      // - normPos 0.5..0.75 (bottom border) = rhythmic bass
+      // - normPos 0.25..0.5 & 0.75..1.0 (sides) = mid synth/vocal waves
+      // - normPos 0.0..0.25 (top) = sparkling treble
+      let amp = 0.2;
+      if (normPos >= 0.45 && normPos <= 0.75) {
+        // Bass band
+        const bassWave = Math.abs(Math.sin(timestamp * 0.0055 * speedMult + i * 0.22));
+        amp = 0.25 + 0.75 * Math.pow(bassWave, 1.5);
+      } else if (normPos < 0.25) {
+        // Treble band
+        const trebleWave = Math.abs(Math.sin(timestamp * 0.009 * speedMult + i * 0.85));
+        amp = 0.15 + 0.85 * Math.pow(trebleWave, 2.0);
+      } else {
+        // Mid-range band
+        const midWave = Math.abs(Math.sin(timestamp * 0.004 * speedMult + i * 0.45));
+        amp = 0.3 + 0.7 * midWave;
+      }
+
+      const barLw = (1.3 + 2.2 * amp) * T;
+      const barBlur = (2.5 + 4.5 * amp) * T;
+      const color = amp > 0.7 ? cAccent : (amp > 0.4 ? cPrimary : cSecondary);
 
       ctx.save();
-      ctx.lineCap = "butt";
-      ctx.lineWidth = core * 0.8;
-      ctx.shadowBlur = 2.5 * T * dpr;
-      ctx.shadowColor = this.rgbString(cAccent, 0.9);
-      for (let k = 0; k < steps; k++) {
-        const segStart = headPos - cometLen + k * seg;
-        const wrapped = ((segStart % perimeter) + perimeter) % perimeter;
-        const a = (k + 1) / steps;
-        ctx.globalAlpha = a * a * activeIntensity;
-        ctx.strokeStyle = this.rgbString(a > 0.8 ? { r: 255, g: 255, b: 255 } : cAccent);
-        ctx.setLineDash([seg + 0.5, perimeter - seg]);
-        ctx.lineDashOffset = -wrapped;
-        this.roundedRectPath(ctx, x, y, w, h, r);
-        ctx.stroke();
-      }
+      ctx.globalAlpha = (0.55 + 0.45 * amp) * activeIntensity;
+      ctx.lineWidth = barLw;
+      ctx.strokeStyle = this.rgbString(color);
+      ctx.shadowColor = this.rgbString(color, 1.0);
+      ctx.shadowBlur = barBlur * dpr;
+      ctx.setLineDash([dashLen, perimeter - dashLen]);
+      ctx.lineDashOffset = -pos;
+      this.roundedRectPath(ctx, x, y, w, h, r);
+      ctx.stroke();
       ctx.restore();
     }
 
-    // 10. Progress sweep + glowing head
-    if (fx.progress && this.status === "playing" && this.timelineEndMs > 0) {
-      const extrapolatedMs = this.timelinePositionMs + (performance.now() - this.lastTimelineTimestamp);
-      const progress = Math.max(0, Math.min(1, extrapolatedMs / this.timelineEndMs));
-      const arcLength = perimeter * progress;
+    ctx.restore();
+  }
 
-      if (arcLength > 1) {
-        ctx.save();
-        ctx.setLineDash([arcLength, perimeter]);
-        ctx.lineDashOffset = 0;
-        ctx.lineWidth = 3 * T;
-        ctx.strokeStyle = this.rgbString(cAccent, activeIntensity);
-        ctx.shadowColor = "#ffffff";
-        ctx.shadowBlur = 6 * dpr;
-        this.roundedRectPath(ctx, x, y, w, h, r);
-        ctx.stroke();
-        ctx.restore();
+  // ───────────────────────── Style 5: Plasma Storm ─────────────────────────
 
-        // Glowing dot at the tip of the progress arc
-        const head = this.pointOnPath(arcLength, x, y, w, h, r);
+  private renderPlasmaStorm(
+    ctx: CanvasRenderingContext2D,
+    dpr: number,
+    timestamp: number,
+    delta: number,
+    speedMult: number,
+    blurMult: number,
+    activeIntensity: number,
+    T: number,
+    core: number,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    r: number,
+    cx: number,
+    cy: number,
+    _perimeter: number,
+    cPrimary: ColorLerp,
+    cSecondary: ColorLerp,
+    cAccent: ColorLerp
+  ) {
+    this.rotationAngle = (this.rotationAngle + delta * 0.0009 * speedMult) % (Math.PI * 2);
+    const counterAngle = (-timestamp * 0.0012 * speedMult) % (Math.PI * 2);
+
+    let grad1: CanvasGradient;
+    let grad2: CanvasGradient;
+
+    if (typeof ctx.createConicGradient === "function") {
+      grad1 = ctx.createConicGradient(this.rotationAngle, cx, cy);
+      grad1.addColorStop(0.0, this.rgbString(cPrimary));
+      grad1.addColorStop(0.5, this.rgbString(cSecondary));
+      grad1.addColorStop(1.0, this.rgbString(cPrimary));
+
+      grad2 = ctx.createConicGradient(counterAngle, cx, cy);
+      grad2.addColorStop(0.0, this.rgbString(cSecondary));
+      grad2.addColorStop(0.5, this.rgbString(cAccent));
+      grad2.addColorStop(1.0, this.rgbString(cSecondary));
+    } else {
+      grad1 = ctx.createLinearGradient(x, y, x + w, y + h);
+      grad1.addColorStop(0.0, this.rgbString(cPrimary));
+      grad1.addColorStop(1.0, this.rgbString(cSecondary));
+
+      grad2 = ctx.createLinearGradient(x + w, y, x, y + h);
+      grad2.addColorStop(0.0, this.rgbString(cSecondary));
+      grad2.addColorStop(1.0, this.rgbString(cAccent));
+    }
+
+    // Outer plasma wave surge
+    ctx.save();
+    ctx.globalAlpha = 0.70 * activeIntensity;
+    ctx.lineWidth = 2.4 * T;
+    ctx.strokeStyle = grad1;
+    ctx.shadowColor = this.rgbString(cPrimary, 1.0);
+    ctx.shadowBlur = 5.5 * T * blurMult * dpr;
+    this.roundedRectPath(ctx, x, y, w, h, r);
+    ctx.stroke();
+    ctx.restore();
+
+    // Opposing liquid chroma wave surge
+    ctx.save();
+    ctx.globalAlpha = 0.85 * activeIntensity;
+    ctx.lineWidth = 1.6 * T;
+    ctx.strokeStyle = grad2;
+    ctx.shadowColor = this.rgbString(cAccent, 1.0);
+    ctx.shadowBlur = 3.6 * T * blurMult * dpr;
+    this.roundedRectPath(ctx, x, y, w, h, r);
+    ctx.stroke();
+    ctx.restore();
+
+    // Central electric filament
+    ctx.save();
+    ctx.globalAlpha = 1.0 * activeIntensity;
+    ctx.lineWidth = core * 1.25;
+    ctx.strokeStyle = this.rgbString(cAccent);
+    ctx.shadowColor = "#ffffff";
+    ctx.shadowBlur = 2.5 * T * dpr;
+    this.roundedRectPath(ctx, x, y, w, h, r);
+    ctx.stroke();
+    ctx.restore();
+
+    // 4 Corner Plasma Flare Nodes
+    if (!this.isMaximized) {
+      const corners = [
+        { cx: x + r, cy: y + r },
+        { cx: x + w - r, cy: y + r },
+        { cx: x + w - r, cy: y + h - r },
+        { cx: x + r, cy: y + h - r },
+      ];
+
+      for (let k = 0; k < 4; k++) {
+        const flare = 0.5 + 0.5 * Math.sin(timestamp * 0.0035 * speedMult + k * 1.57);
         ctx.save();
-        ctx.globalAlpha = Math.min(1, activeIntensity);
+        ctx.globalAlpha = (0.55 + 0.45 * flare) * activeIntensity;
         ctx.fillStyle = "#ffffff";
-        ctx.shadowColor = this.rgbString(cAccent, 1);
-        ctx.shadowBlur = 10 * T * dpr;
+        ctx.shadowColor = this.rgbString(cAccent, 1.0);
+        ctx.shadowBlur = (6.0 + 12.0 * flare) * T * dpr;
         ctx.beginPath();
-        ctx.arc(head.x, head.y, 2.6 * T, 0, Math.PI * 2);
+        ctx.arc(corners[k].cx, corners[k].cy, (2.2 + 1.4 * flare) * T, 0, Math.PI * 2);
         ctx.fill();
         ctx.restore();
       }
     }
+  }
 
+  // ───────────────────────── Style 6: Zen Progress ─────────────────────────
+
+  private renderZenProgress(
+    ctx: CanvasRenderingContext2D,
+    dpr: number,
+    timestamp: number,
+    _delta: number,
+    _speedMult: number,
+    _blurMult: number,
+    activeIntensity: number,
+    T: number,
+    core: number,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    r: number,
+    _cx: number,
+    _cy: number,
+    perimeter: number,
+    cPrimary: ColorLerp,
+    _cSecondary: ColorLerp,
+    cAccent: ColorLerp
+  ) {
+    // 1. Radiant ambient baseline framing
+    ctx.save();
+    ctx.globalAlpha = 0.32 * activeIntensity;
+    ctx.lineWidth = core * 1.0;
+    ctx.strokeStyle = this.rgbString(cPrimary);
+    ctx.shadowColor = this.rgbString(cPrimary, 1.0);
+    ctx.shadowBlur = 2.5 * T * dpr;
+    this.roundedRectPath(ctx, x, y, w, h, r);
+    ctx.stroke();
     ctx.restore();
+
+    // 2. Real-time song progress arc
+    let progress = 0;
+    if (this.timelineEndMs > 0) {
+      const extrapolatedMs =
+        this.status === "playing"
+          ? this.timelinePositionMs + (performance.now() - this.lastTimelineTimestamp)
+          : this.timelinePositionMs;
+      progress = Math.max(0, Math.min(1, extrapolatedMs / this.timelineEndMs));
+    }
+
+    const arcLength = perimeter * progress;
+
+    if (arcLength > 1) {
+      // Completed progress line
+      ctx.save();
+      ctx.setLineDash([arcLength, perimeter]);
+      ctx.lineDashOffset = 0;
+      ctx.lineWidth = 1.8 * T;
+      ctx.strokeStyle = this.rgbString(cPrimary, activeIntensity);
+      ctx.shadowColor = this.rgbString(cPrimary, 1.0);
+      ctx.shadowBlur = 6.0 * T * dpr;
+      this.roundedRectPath(ctx, x, y, w, h, r);
+      ctx.stroke();
+      ctx.restore();
+
+      // Playhead Beacon at the tip of the progress arc
+      const head = this.pointOnPath(arcLength, x, y, w, h, r);
+      const beaconBreath = 0.85 + 0.15 * Math.sin(timestamp * 0.003);
+
+      // Outer aura
+      ctx.save();
+      ctx.globalAlpha = 0.9 * activeIntensity;
+      ctx.strokeStyle = this.rgbString(cAccent, 1.0);
+      ctx.shadowColor = this.rgbString(cAccent, 1.0);
+      ctx.shadowBlur = 12 * T * dpr;
+      ctx.lineWidth = 1.4 * T;
+      ctx.beginPath();
+      ctx.arc(head.x, head.y, 4.5 * T * beaconBreath, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+
+      // Inner solid incandescent core
+      ctx.save();
+      ctx.globalAlpha = activeIntensity;
+      ctx.fillStyle = "#ffffff";
+      ctx.shadowColor = "#ffffff";
+      ctx.shadowBlur = 8 * T * dpr;
+      ctx.beginPath();
+      ctx.arc(head.x, head.y, 2.6 * T, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
   }
 }

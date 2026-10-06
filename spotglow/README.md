@@ -2,9 +2,49 @@
 
 A Windows 10/11 app that draws an animated glow around the edge of the Spotify desktop window, colored and styled by the currently playing song.
 
+
+![![alt text](image-1.png)](image.png)
+
 **Hard constraint:** Windows SMTC (`GlobalSystemMediaTransportControlsSessionManager`) is the exclusive data source. No Spotify Web API, no OAuth, no dev account, no audio capture.
 
 ---
+
+## ⚡ One-Command Installation
+
+Any user on Windows 10/11 can install and launch SpotGlow with **a single command**:
+
+### Method 1: PowerShell Web Installer (Recommended)
+Open PowerShell and run:
+```powershell
+irm https://raw.githubusercontent.com/<user>/spotglow/main/install.ps1 | iex
+```
+*(Installs cleanly into `%LOCALAPPDATA%\Programs\SpotGlow`, creates Start Menu shortcuts, and launches instantly—no Administrator rights required!)*
+
+### Method 2: Windows Package Manager (`winget`)
+```cmd
+winget install spotglow
+```
+
+### Method 3: Silent Installer Command
+If you downloaded the setup executable or are deploying across machines:
+```cmd
+SpotGlow_0.1.0_x64-setup.exe /S
+```
+
+### Method 4: Portable Executable (Zero Install)
+You can also run the standalone release executable `spotglow.exe` directly without any installation.
+
+---
+
+## Building the Installer Package
+
+To build the standalone NSIS installer bundle yourself:
+```powershell
+cd spotglow
+npm run tauri build -- --bundles nsis
+```
+The installer is packaged at:
+`src-tauri/target/release/bundle/nsis/SpotGlow_0.1.0_x64-setup.exe` (only ~1.88 MB!).
 
 ## Architecture & Repo Layout
 
