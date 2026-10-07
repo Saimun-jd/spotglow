@@ -1,3 +1,4 @@
+pub mod audio_reactive;
 pub mod overlay;
 pub mod palette;
 pub mod settings;
@@ -81,6 +82,16 @@ async fn media_previous() -> Result<bool, String> {
 }
 
 #[tauri::command]
+async fn get_audio_beat(state: tauri::State<'_, AppState>) -> Result<audio_reactive::AudioBeatPayload, String> {
+    let guard = state.audio_engine.read().await;
+    if let Some(engine) = guard.as_ref() {
+        Ok(engine.get_latest())
+    } else {
+        Ok(audio_reactive::AudioBeatPayload::default())
+    }
+}
+
+#[tauri::command]
 async fn save_canvas_snapshot(data_url: String, metrics: String) -> Result<(), String> {
     info!("[SpotGlow Frontend Metrics] {}", metrics);
     if let Some(base64_str) = data_url.strip_prefix("data:image/png;base64,") {
@@ -117,6 +128,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_spotify_window,
             get_current_track,
+            get_audio_beat,
             save_canvas_snapshot,
             get_display_mode,
             set_display_mode,
@@ -131,6 +143,14 @@ pub fn run() {
             let app_state = app_state.clone();
             move |app| {
                 let app_handle = app.handle().clone();
+
+                // Start WASAPI Loopback Audio Reactive Engine
+                let audio_engine = Arc::new(audio_reactive::AudioReactiveEngine::new());
+                audio_engine.start(app_handle.clone());
+                {
+                    let mut guard = app_state.audio_engine.blocking_write();
+                    *guard = Some(audio_engine);
+                }
 
                 // Bridge SMTC track updates to Tauri "track_update" frontend event
                 let handle_for_track = app_handle.clone();

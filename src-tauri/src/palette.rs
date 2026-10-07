@@ -201,7 +201,14 @@ pub fn extract_palette_from_image(img: &DynamicImage) -> PaletteInfo {
             .unwrap_or_else(|| adjust_lightness(primary, 0.2));
     } else {
         // Fallback to dominant clusters from all (e.g. monochrome / black and white images)
-        primary = all_clusters[0].color;
+        let raw_p = all_clusters[0].color;
+        let luma = luma01(raw_p.r, raw_p.g, raw_p.b);
+        primary = if luma < 0.22 {
+            // Ethereal moonlight platinum for pitch-black / night photography art
+            ColorRgb::new(215, 232, 255)
+        } else {
+            raw_p
+        };
         secondary = all_clusters
             .get(1)
             .map(|c| c.color)

@@ -10,6 +10,16 @@ export type GlowStyle =
 
 export type GlowMode = GlowStyle | "flow" | "breathe" | "progress" | "comet" | "all";
 
+export interface AudioBeatPayload {
+  bass: number;
+  mid: number;
+  treble: number;
+  volume: number;
+  beat: number;
+  is_beat: boolean;
+  bpm: number;
+}
+
 interface ColorLerp {
   r: number;
   g: number;
@@ -66,6 +76,17 @@ export class GlowRenderer {
   private burst: number = 0;
   private lastTitle: string = "";
 
+  // Audio Reactive STFT State
+  private audioBeat: AudioBeatPayload = {
+    bass: 0,
+    mid: 0,
+    treble: 0,
+    volume: 0,
+    beat: 0,
+    is_beat: false,
+    bpm: 0,
+  };
+
   // Animation Loop
   private animFrameId: number | null = null;
   private isRunning: boolean = false;
@@ -105,6 +126,10 @@ export class GlowRenderer {
    *  Send this to Rust (set_margin) whenever thickness changes. */
   public getRecommendedMargin(): number {
     return Math.ceil(REACH_PER_THICKNESS * this.thickness) + 2;
+  }
+
+  public updateAudioBeat(payload: AudioBeatPayload) {
+    this.audioBeat = payload;
   }
 
   public setStyle(style: GlowStyle | string) {
@@ -651,7 +676,7 @@ export class GlowRenderer {
     _cy: number,
     _perimeter: number,
     cPrimary: ColorLerp,
-    _cSecondary: ColorLerp,
+    cSecondary: ColorLerp,
     cAccent: ColorLerp
   ) {
     // Cardiac rhythmic waveform: primary thump + secondary reverberation
@@ -660,36 +685,61 @@ export class GlowRenderer {
     const beat1 = Math.pow(s1, 1.8);
     const s2 = Math.max(0, Math.sin(omega * 2));
     const beat2 = 0.32 * Math.pow(s2, 2.5);
-    const pulse = Math.min(1.0, beat1 + beat2);
+    const synthPulse = Math.min(1.0, beat1 + beat2);
+    const pulse = this.audioBeat.beat > 0.04
+      ? Math.min(1.0, this.audioBeat.beat * 0.90 + this.audioBeat.bass * 0.35)
+      : synthPulse;
 
-    const outerLw = (1.8 + 2.2 * pulse) * T;
-    const outerBlur = (3.5 + 5.5 * pulse) * T * blurMult;
+    const beatStrength = Math.min(1.0, Math.max(0.0, pulse));
+    const totalGlow = Math.min(1.0, Math.max(0.12, 0.15 + beatStrength * 0.85)) * activeIntensity;
 
-    // 1. Outward pulsating diffuse aura
+    // Layer 4 (Distance ~35-50px): Distant diffuse radiance (lowest opacity)
     ctx.save();
-    ctx.globalAlpha = (0.55 + 0.45 * pulse) * activeIntensity;
-    ctx.lineWidth = outerLw;
-    ctx.strokeStyle = this.rgbString(cPrimary);
-    ctx.shadowColor = this.rgbString(cPrimary, 1.0);
-    ctx.shadowBlur = outerBlur * dpr;
+    ctx.globalAlpha = 0.10 * totalGlow;
+    ctx.lineWidth = (3.2 + 2.5 * beatStrength) * T;
+    ctx.strokeStyle = this.rgbString(cSecondary);
+    ctx.shadowColor = this.rgbString(cSecondary, 1.0);
+    ctx.shadowBlur = (14.0 + 16.0 * beatStrength) * T * blurMult * dpr;
     this.roundedRectPath(ctx, x, y, w, h, r);
     ctx.stroke();
     ctx.restore();
 
-    // 2. High-contrast neon laser core
+    // Layer 3 (Distance ~16-25px): Mid bloom radiance (soft opacity)
     ctx.save();
-    ctx.globalAlpha = 1.0 * activeIntensity;
+    ctx.globalAlpha = 0.26 * totalGlow;
+    ctx.lineWidth = (2.4 + 2.0 * beatStrength) * T;
+    ctx.strokeStyle = this.rgbString(cPrimary);
+    ctx.shadowColor = this.rgbString(cPrimary, 1.0);
+    ctx.shadowBlur = (7.0 + 9.0 * beatStrength) * T * blurMult * dpr;
+    this.roundedRectPath(ctx, x, y, w, h, r);
+    ctx.stroke();
+    ctx.restore();
+
+    // Layer 2 (Distance ~6-12px): Concentric near halo (medium opacity)
+    ctx.save();
+    ctx.globalAlpha = 0.55 * totalGlow;
+    ctx.lineWidth = (1.8 + 1.4 * beatStrength) * T;
+    ctx.strokeStyle = this.rgbString(cPrimary);
+    ctx.shadowColor = this.rgbString(cPrimary, 1.0);
+    ctx.shadowBlur = (3.5 + 4.5 * beatStrength) * T * blurMult * dpr;
+    this.roundedRectPath(ctx, x, y, w, h, r);
+    ctx.stroke();
+    ctx.restore();
+
+    // Layer 1 (Distance ~0-2px): High-contrast neon laser core (highest opacity)
+    ctx.save();
+    ctx.globalAlpha = 0.95 * totalGlow;
     ctx.lineWidth = core * 1.15;
-    ctx.strokeStyle = this.rgbString(pulse > 0.55 ? { r: 255, g: 255, b: 255 } : cAccent);
+    ctx.strokeStyle = this.rgbString(beatStrength > 0.55 ? { r: 255, g: 255, b: 255 } : cAccent);
     ctx.shadowColor = this.rgbString(cAccent, 1.0);
-    ctx.shadowBlur = (2.0 + 4.0 * pulse) * T * dpr;
+    ctx.shadowBlur = (1.5 + 3.5 * beatStrength) * T * dpr;
     this.roundedRectPath(ctx, x, y, w, h, r);
     ctx.stroke();
     ctx.restore();
 
     // 3. Corner neon brackets (accentuate corners on beat pulses)
-    if (pulse > 0.25 && !this.isMaximized) {
-      const pingAlpha = Math.min(1.0, (pulse - 0.25) / 0.75 * 1.2 * activeIntensity);
+    if (beatStrength > 0.20 && !this.isMaximized) {
+      const pingAlpha = Math.min(1.0, (beatStrength - 0.20) / 0.80 * 1.2) * totalGlow;
       const bracketLen = 24 * T;
       ctx.save();
       ctx.globalAlpha = pingAlpha;
@@ -898,12 +948,18 @@ export class GlowRenderer {
       const pos = i * step;
       const normPos = pos / perimeter;
 
-      // Simulated multi-band frequency response:
-      // - normPos 0.5..0.75 (bottom border) = rhythmic bass
-      // - normPos 0.25..0.5 & 0.75..1.0 (sides) = mid synth/vocal waves
-      // - normPos 0.0..0.25 (top) = sparkling treble
+      // Multi-band frequency response:
+      // Uses live WASAPI loopback STFT bands if audio is playing, else fallback to smooth ambient wave
       let amp = 0.2;
-      if (normPos >= 0.45 && normPos <= 0.75) {
+      if (this.audioBeat.volume > 0.02) {
+        if (normPos >= 0.45 && normPos <= 0.75) {
+          amp = 0.22 + 0.78 * this.audioBeat.bass;
+        } else if (normPos < 0.25) {
+          amp = 0.18 + 0.82 * this.audioBeat.treble;
+        } else {
+          amp = 0.20 + 0.80 * this.audioBeat.mid;
+        }
+      } else if (normPos >= 0.45 && normPos <= 0.75) {
         // Bass band
         const bassWave = Math.abs(Math.sin(timestamp * 0.0055 * speedMult + i * 0.22));
         amp = 0.25 + 0.75 * Math.pow(bassWave, 1.5);

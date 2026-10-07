@@ -156,15 +156,30 @@ impl WindowTracker {
                 }
 
                 // 2. Verify current HWND or re-search for Spotify
-                let spotify_valid = current_hwnd.map_or(false, |h| unsafe { IsWindow(Some(h)).as_bool() });
+                let spotify_valid = current_hwnd.map_or(false, |h| unsafe {
+                    if !IsWindow(Some(h)).as_bool() {
+                        return false;
+                    }
+                    // If Spotify is hidden (e.g. minimized to tray) and not iconic, and not hidden by our mode
+                    if !IsWindowVisible(h).as_bool() && !IsIconic(h).as_bool() && !SPOTIFY_DELIBERATELY_HIDDEN.load(Ordering::Relaxed) {
+                        return false;
+                    }
+                    true
+                });
 
                 if !spotify_valid {
                     if let Some(hwnd) = find_spotify_window() {
                         current_hwnd = Some(hwnd);
                         unsafe { ACTIVE_SPOTIFY_HWND = hwnd.0 as isize; }
                         info!("[WindowTracker] Spotify attached/re-detected: HWND=0x{:x}", hwnd.0 as isize);
+                        if let Some(state) = get_window_state(hwnd) {
+                            if let Some(cb) = &on_event {
+                                cb(state.clone());
+                            }
+                            last_state = state;
+                        }
                     } else if current_hwnd.is_some() {
-                        info!("[WindowTracker] Spotify closed or exited.");
+                        info!("[WindowTracker] Spotify closed or minimized to tray.");
                         current_hwnd = None;
                         unsafe { ACTIVE_SPOTIFY_HWND = 0; }
                         let empty_state = SpotifyWindowState::default();
@@ -196,8 +211,11 @@ impl WindowTracker {
                     }
                 }
 
-                // 4. Sleep ~16ms (60 Hz refresh rate for smooth real-time tracking)
-                std::thread::sleep(Duration::from_millis(16));
+                // 4. Adaptive polling rate:
+                // When Spotify is attached: 16ms (~60 FPS for smooth, low-latency window following)
+                // When Spotify is closed/standby: 350ms (drops idle CPU to 0% while detecting launch within milliseconds)
+                let sleep_ms = if current_hwnd.is_none() { 350 } else { 16 };
+                std::thread::sleep(Duration::from_millis(sleep_ms));
             }
 
             // Cleanup
@@ -334,8 +352,18 @@ pub fn find_spotify_window() -> Option<HWND> {
                     let title_len = GetWindowTextW(hwnd, &mut title_buf);
                     let title = String::from_utf16_lossy(&title_buf[..title_len as usize]);
 
-                    // Spotify desktop main window has a title (or when iconic or deliberately hidden)
-                    if !title.is_empty() || IsIconic(hwnd).as_bool() || is_hidden {
+                    // Check window dimensions to capture CEF main UI window during early launch before title is populated
+                    let mut wr = RECT::default();
+                    let has_size = if GetWindowRect(hwnd, &mut wr).is_ok() {
+                        let w = wr.right - wr.left;
+                        let h = wr.bottom - wr.top;
+                        w > 200 && h > 200
+                    } else {
+                        false
+                    };
+
+                    // Spotify desktop main window has a title, or is iconic, or is deliberately hidden, or has valid window size
+                    if !title.is_empty() || IsIconic(hwnd).as_bool() || is_hidden || has_size {
                         let _ = CloseHandle(process);
                         ctx.found = Some(hwnd);
                         return BOOL(0); // Stop enumeration

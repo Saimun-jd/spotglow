@@ -28,6 +28,16 @@
         <div class="album-aura-glow"></div>
         <div class="aurora-mesh-overlay"></div>
         <div class="film-grain"></div>
+        <!-- Scattered Ambient Star Sparkles (React to Beat) -->
+        <div class="ambient-stars-field" aria-hidden="true">
+          <div class="ambient-star star-1"></div>
+          <div class="ambient-star star-2"></div>
+          <div class="ambient-star star-3"></div>
+          <div class="ambient-star star-4"></div>
+          <div class="ambient-star star-5"></div>
+          <div class="ambient-star star-6"></div>
+          <div class="ambient-star star-7"></div>
+        </div>
       </div>
 
       <!-- Header with Mode Toggle & Status -->
@@ -36,105 +46,133 @@
           <span class="pulsing-dot"></span>
           <span class="brand-name">SpotGlow</span>
           <span class="brand-divider">•</span>
-          <span class="brand-sub">Cover Focus</span>
+          <span id="brand-mode-sub" class="brand-sub">Cover Focus</span>
         </div>
-        <button id="btn-flip-glow" class="glass-btn btn-flip" title="Flip to transparent border glow (Esc)">
-          <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-            <line x1="9" y1="3" x2="9" y2="21" />
-          </svg>
-          <span>Border Glow</span>
-          <kbd class="shortcut-tag">Esc</kbd>
-        </button>
+        <div class="header-actions">
+          <button id="btn-toggle-lyrics" class="glass-btn btn-lyrics" title="Toggle Real-Time Lyrics (L)">
+            <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M9 18V5l12-2v13" />
+              <circle cx="6" cy="18" r="3" />
+              <circle cx="18" cy="16" r="3" />
+            </svg>
+            <span id="btn-lyrics-text">Lyrics</span>
+            <kbd class="shortcut-tag">L</kbd>
+          </button>
+          <button id="btn-flip-glow" class="glass-btn btn-flip" title="Flip to transparent border glow (Esc)">
+            <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+              <line x1="9" y1="3" x2="9" y2="21" />
+            </svg>
+            <span>Border Glow</span>
+            <kbd class="shortcut-tag">Esc</kbd>
+          </button>
+        </div>
       </header>
 
       <!-- Central Music Showcase -->
-      <section class="shroud-content">
-        <!-- Album Artwork Card with Dynamic Ambient Shadow & Pulsing Glow -->
-        <div class="cover-card-container" id="cover-card-container">
-          <!-- Ambient Glow Pulse Elements (Ripples, Bloom, Halo, Rim) -->
-          <div class="cover-pulse-wave wave-1" aria-hidden="true"></div>
-          <div class="cover-pulse-wave wave-2" aria-hidden="true"></div>
-          <div class="cover-pulse-bloom" aria-hidden="true"></div>
-          <div class="cover-pulse-halo" aria-hidden="true"></div>
-          <div class="cover-pulse-rim" aria-hidden="true"></div>
+      <section class="shroud-content" id="shroud-content">
+        <div class="album-sidebar" id="album-sidebar">
+          <!-- Album Artwork Card with Dynamic Ambient Shadow & Pulsing Glow -->
+          <div class="cover-card-container" id="cover-card-container">
+            <!-- Ambient Glow Pulse Elements (Ripples, Bloom, Halo, Rim) -->
+            <div class="cover-pulse-wave wave-1" aria-hidden="true"></div>
+            <div class="cover-pulse-wave wave-2" aria-hidden="true"></div>
+            <div class="cover-pulse-wave wave-3" aria-hidden="true"></div>
+            <div class="cover-pulse-wave wave-4" aria-hidden="true"></div>
+            <div class="cover-pulse-bloom" aria-hidden="true"></div>
+            <div class="cover-pulse-halo" aria-hidden="true"></div>
+            <div class="cover-pulse-rim" aria-hidden="true"></div>
 
-          <div class="cover-card" id="cover-card">
-            <img id="cover-img" class="cover-img" src="" alt="Album Artwork" />
-            <div id="cover-placeholder" class="cover-placeholder">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                <circle cx="12" cy="12" r="10" />
-                <circle cx="12" cy="12" r="3" />
+            <div class="cover-card" id="cover-card">
+              <img id="cover-img" class="cover-img" src="" alt="Album Artwork" />
+              <div id="cover-placeholder" class="cover-placeholder">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <circle cx="12" cy="12" r="10" />
+                  <circle cx="12" cy="12" r="3" />
+                </svg>
+              </div>
+              <div class="playback-badge" id="playback-badge">
+                <span class="badge-eq">
+                  <span class="bar bar-1"></span>
+                  <span class="bar bar-2"></span>
+                  <span class="bar bar-3"></span>
+                </span>
+                <span id="badge-text">PLAYING</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Track Metadata -->
+          <div class="track-info">
+            <h1 id="track-title" class="track-title">Waiting for Spotify...</h1>
+            <h2 id="track-artist" class="track-artist">—</h2>
+            <p id="track-album" class="track-album">—</p>
+          </div>
+
+          <!-- Interactive Timeline & Scrubber -->
+          <div class="timeline-container">
+            <span id="time-current" class="time-label">0:00</span>
+            <div id="timeline-track" class="timeline-track">
+              <div id="timeline-fill" class="timeline-fill"></div>
+            </div>
+            <span id="time-total" class="time-label">0:00</span>
+          </div>
+
+          <!-- Playback Controls -->
+          <div class="controls-bar">
+            <button id="btn-prev" class="control-btn control-btn-secondary" title="Previous Track">
+              <svg viewBox="0 0 24 24" fill="currentColor">
+                <path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/>
               </svg>
-            </div>
-            <div class="playback-badge" id="playback-badge">
-              <span class="badge-eq">
-                <span class="bar bar-1"></span>
-                <span class="bar bar-2"></span>
-                <span class="bar bar-3"></span>
-              </span>
-              <span id="badge-text">PLAYING</span>
+            </button>
+
+            <button id="btn-play-pause" class="control-btn control-btn-primary" title="Play / Pause (Space)">
+              <svg id="icon-pause" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
+              </svg>
+              <svg id="icon-play" class="hidden" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M8 5v14l11-7z"/>
+              </svg>
+            </button>
+
+            <button id="btn-next" class="control-btn control-btn-secondary" title="Next Track">
+              <svg viewBox="0 0 24 24" fill="currentColor">
+                <path d="m6 18 8.5-6L6 6v12zM16 6v12h2V6h-2z"/>
+              </svg>
+            </button>
+          </div>
+
+          <!-- Style Preset Picker for Mode 1 -->
+          <div class="style-picker-container">
+            <span class="style-picker-label">Glow Animation:</span>
+            <div class="style-pills-row" id="style-pills-row">
+              <button class="style-pill active" data-style="aurora_flow">Aurora</button>
+              <button class="style-pill" data-style="cyber_pulse">Pulse</button>
+              <button class="style-pill" data-style="comet_orbit">Comet</button>
+              <button class="style-pill" data-style="audio_eq">Sound EQ</button>
+              <button class="style-pill" data-style="plasma_storm">Plasma</button>
+              <button class="style-pill" data-style="zen_progress">Zen</button>
             </div>
           </div>
         </div>
 
-        <!-- Track Metadata -->
-        <div class="track-info">
-          <h1 id="track-title" class="track-title">Waiting for Spotify...</h1>
-          <h2 id="track-artist" class="track-artist">—</h2>
-          <p id="track-album" class="track-album">—</p>
-        </div>
-
-        <!-- Interactive Timeline & Scrubber -->
-        <div class="timeline-container">
-          <span id="time-current" class="time-label">0:00</span>
-          <div id="timeline-track" class="timeline-track">
-            <div id="timeline-fill" class="timeline-fill"></div>
+        <!-- Real-Time Synced Lyrics Stage -->
+        <div id="lyrics-stage" class="lyrics-stage hidden" aria-label="Real-time Synced Lyrics">
+          <div id="lyrics-scroll-container" class="lyrics-scroll-container">
+            <div id="lyrics-lines" class="lyrics-lines">
+              <!-- Dynamically rendered lyric lines -->
+            </div>
           </div>
-          <span id="time-total" class="time-label">0:00</span>
-        </div>
-
-        <!-- Playback Controls -->
-        <div class="controls-bar">
-          <button id="btn-prev" class="control-btn control-btn-secondary" title="Previous Track">
-            <svg viewBox="0 0 24 24" fill="currentColor">
-              <path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/>
-            </svg>
-          </button>
-
-          <button id="btn-play-pause" class="control-btn control-btn-primary" title="Play / Pause (Space)">
-            <svg id="icon-pause" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
-            </svg>
-            <svg id="icon-play" class="hidden" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M8 5v14l11-7z"/>
-            </svg>
-          </button>
-
-          <button id="btn-next" class="control-btn control-btn-secondary" title="Next Track">
-            <svg viewBox="0 0 24 24" fill="currentColor">
-              <path d="m6 18 8.5-6L6 6v12zM16 6v12h2V6h-2z"/>
-            </svg>
-          </button>
-        </div>
-
-        <!-- Style Preset Picker for Mode 1 -->
-        <div class="style-picker-container">
-          <span class="style-picker-label">Glow Animation:</span>
-          <div class="style-pills-row" id="style-pills-row">
-            <button class="style-pill active" data-style="aurora_flow">Aurora</button>
-            <button class="style-pill" data-style="cyber_pulse">Pulse</button>
-            <button class="style-pill" data-style="comet_orbit">Comet</button>
-            <button class="style-pill" data-style="audio_eq">Sound EQ</button>
-            <button class="style-pill" data-style="plasma_storm">Plasma</button>
-            <button class="style-pill" data-style="zen_progress">Zen</button>
+          <div id="lyrics-status" class="lyrics-status hidden">
+            <div class="lyrics-status-icon">♪</div>
+            <div id="lyrics-status-text" class="lyrics-status-text">Instrumental Track</div>
           </div>
         </div>
       </section>
 
       <!-- Footer Info -->
       <footer class="shroud-footer">
-        <span class="footer-tip">Press <kbd>F8</kbd> to cycle animation styles • <kbd>F9</kbd> / <kbd>Esc</kbd> to return to border halo</span>
+        <span class="footer-tip">Press <kbd>L</kbd> for live lyrics • <kbd>F8</kbd> to cycle styles • <kbd>Esc</kbd> to return to border halo</span>
       </footer>
     </main>
   </body>

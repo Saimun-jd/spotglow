@@ -166,6 +166,7 @@ pub struct AppState {
     pub overlay_controller: Arc<RwLock<Option<crate::overlay::OverlayController>>>,
     pub display_mode: Arc<RwLock<DisplayMode>>,
     pub glow_style: Arc<RwLock<GlowStyle>>,
+    pub audio_engine: Arc<RwLock<Option<Arc<crate::audio_reactive::AudioReactiveEngine>>>>,
 }
 
 impl AppState {
@@ -177,6 +178,7 @@ impl AppState {
             overlay_controller: Arc::new(RwLock::new(None)),
             display_mode: Arc::new(RwLock::new(DisplayMode::BorderGlow)),
             glow_style: Arc::new(RwLock::new(GlowStyle::default())),
+            audio_engine: Arc::new(RwLock::new(None)),
         }
     }
 }
